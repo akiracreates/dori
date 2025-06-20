@@ -14,7 +14,6 @@ from bot.database.db_helpers import (
 from bot.handlers.teacher import delete_message_later
 from bot.menus import personal_dict_menu, student_main_menu, student_word_view_menu
 from bot.services.card_generator import generate_flashcard_image
-from bot.handlers.start import stop_flashcard_session 
 
 
 router = Router()
@@ -46,6 +45,9 @@ def pick_weighted_word(words):
             return word
         upto += word["weight"]
     return words[-1]  # fallback
+
+
+
 
 # ---------- Command Handlers ----------
 @router.message(Command("menu_student"))
@@ -114,45 +116,74 @@ async def handle_module_selection(message: types.Message, state: FSMContext):
 
 @router.message(FlashcardState.awaiting_input)
 async def check_flashcard_answer(message: types.Message, state: FSMContext):
-    
+    data = await state.get_data()
+
+    if message.text.strip().lower() == "/stopcard":
+        print("[DEBUG] intercepted /stopcard inside awaiting_input")
+        await state.clear()
+        await message.answer("⛔️ Режим флеш-карт остановлен.")
+        return
+
     session_id = get_or_create_session(message.from_user.id)
     data = await state.get_data()
+
+    # ⛔️ Если /stopcard уже был вызван
+    if data.get("stopcard"):
+        await state.clear()
+        return
+
+    # Защита от потери current_word
+    if "current_word" not in data:
+        await message.answer("⚠️ Ошибка: нет текущего слова.")
+        await state.update_data(stopcard=True)
+        await state.set_state(None)
+
+        return
+
     word = data["current_word"]
     user_input = message.text.strip().lower()
-    correct = word['Text'].strip().lower()
-    is_correct = user_input == correct
+    correct = word["Text"].strip().lower()
+    synonyms = [s.strip().lower() for s in (word.get("synonyms") or "").split(",")]
+    is_correct = user_input == correct or user_input in synonyms
 
-    update_progress(session_id, word['Word_ID'], is_correct)
+    update_progress(session_id, word["Word_ID"], is_correct)
 
-    if is_correct:
-        await message.answer("✅ Верно!")
-    else:
-        part = word.get("part_of_speech", "не указана")
-        await message.answer(
-            f"❌ Неверно.\n\n"
-            f"Правильный ответ: <b>{word['Text']}</b>\n"
-            f"Перевод: {word['translation']}\n"
-            f"Синонимы: {word.get('synonyms', 'не указаны')}\n"
-            f"Часть речи: {part}",
-            parse_mode="HTML"
-        )
-        user_flashcards.setdefault(message.from_user.id, []).append(word)
+    feedback = (
+        "✅ Верно!" if user_input == correct else
+        "✅ Верно (синоним)!" if user_input in synonyms else
+        f"❌ Неверно.\nПравильный ответ: <b>{word['Text']}</b>"
+    )
+    await message.answer(
+        f"{feedback}\nСинонимы: {word.get('synonyms', 'не указаны')}",
+        parse_mode="HTML"
+    )
 
-    next_words = user_flashcards.get(message.from_user.id, [])
-    if not next_words:
+    flashcards = data.get("flashcards", [])
+
+    if not flashcards:
         await message.answer("🎉 Тренировка завершена")
         await state.clear()
         return
 
-    next_word = next_words.pop(0)
-    user_flashcards[message.from_user.id] = next_words
-    await state.update_data(current_word=next_word)
+    if not is_correct:
+        flashcards.append(word)
 
-    image = await generate_flashcard_image(..., is_question=True)
+    next_word = flashcards.pop(0)
+
+    # обновляем только то, что нужно
+    await state.update_data(current_word=next_word, flashcards=flashcards)
+
+    # ещё раз проверим флаг остановки
+    data = await state.get_data()
+    if data.get("stopcard"):
+        await state.clear()
+        return
+
+    image = await generate_flashcard_image(next_word["translation"], is_question=True)
     sent = await message.answer_photo(photo=image)
-
     await message.answer(f"Слово: {next_word['translation']}")
     asyncio.create_task(delete_message_later(message.bot, message.chat.id, sent.message_id))
+
 
 # ---------- Word Editing ----------
 @router.callback_query(F.data == "student_start_edit")

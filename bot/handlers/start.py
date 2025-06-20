@@ -150,24 +150,6 @@ async def handle_flashcard_answer(message: types.Message, state: FSMContext):
     await delete_message_later(message.bot, message.chat.id, sent.message_id)
 
 
-async def stop_flashcard_session(message: types.Message, state: FSMContext):
-    from bot.handlers.start import user_flashcards  # если не вынесено в utils
-    user_flashcards.pop(message.from_user.id, None)
-    await state.clear()
-    await message.answer("⛔️ Режим флеш-карт остановлен.")
-
-@router.message(Command("stopcard"))
-async def cmd_stop_flashcard(message: types.Message, state: FSMContext):
-    await stop_flashcard_session(message, state)
-
-
-@router.message(Command("stopcard"))
-async def force_stopcard(message: types.Message, state: FSMContext):
-    from bot.handlers.start import user_flashcards
-    user_flashcards.pop(message.from_user.id, None)
-    await state.clear()
-    await message.answer("⛔️ Режим флеш-карт остановлен.")
-
 
 # --- Help ---
 @router.message(Command("help"))
