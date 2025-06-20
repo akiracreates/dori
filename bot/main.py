@@ -1,12 +1,16 @@
 # main.py — entry point for Dori Bot
+
 import os
 import asyncio
 import sqlite3
+
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
+
 from bot.services.card_generator import generate_flashcard_image
 from bot.handlers import teacher, student, start
+
 
 # Load environment variables
 load_dotenv()
@@ -27,18 +31,21 @@ async def main():
 
 def initialize_db(db_path="dori_bot.db"):
     conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA foreign_keys = ON;")
     cur = conn.cursor()
 
     cur.executescript("""
-    -- Table: StudentSession
     CREATE TABLE IF NOT EXISTS StudentSession (
         StudentSession_ID INTEGER PRIMARY KEY AUTOINCREMENT,
         telegram_id INTEGER NOT NULL UNIQUE,
         localID TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        role TEXT DEFAULT 'student',
+        level TEXT DEFAULT 'A1',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        score INTEGER DEFAULT 0,
+        last_active DATE
     );
 
-    -- Table: Word
     CREATE TABLE IF NOT EXISTS Word (
         Word_ID INTEGER PRIMARY KEY AUTOINCREMENT,
         Text TEXT NOT NULL,
@@ -53,7 +60,6 @@ def initialize_db(db_path="dori_bot.db"):
         module TEXT
     );
 
-    -- Table: LibraryWord
     CREATE TABLE IF NOT EXISTS LibraryWord (
         LibraryWord_ID INTEGER PRIMARY KEY AUTOINCREMENT,
         added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -62,7 +68,6 @@ def initialize_db(db_path="dori_bot.db"):
         Word_ID INTEGER
     );
 
-    -- Table: PracticeProgress
     CREATE TABLE IF NOT EXISTS PracticeProgress (
         PracticeProgress_ID INTEGER PRIMARY KEY AUTOINCREMENT,
         StudentSession_ID INTEGER,
@@ -72,7 +77,6 @@ def initialize_db(db_path="dori_bot.db"):
         last_practiced DATETIME
     );
 
-    -- Table: Achievement
     CREATE TABLE IF NOT EXISTS Achievement (
         Achievement_ID INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -80,7 +84,6 @@ def initialize_db(db_path="dori_bot.db"):
         criteria TEXT
     );
 
-    -- Table: UserAchievement
     CREATE TABLE IF NOT EXISTS UserAchievement (
         UserAchievement_ID INTEGER PRIMARY KEY AUTOINCREMENT,
         StudentSession_ID INTEGER,
@@ -88,6 +91,7 @@ def initialize_db(db_path="dori_bot.db"):
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     """)
+
     conn.commit()
     conn.close()
 

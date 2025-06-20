@@ -5,18 +5,19 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 from aiogram.filters import Command
+from bot.sharedState import user_flashcards
 
 from bot.database.db_helpers import (
     get_all_modules, get_connection, get_or_create_session, add_word,
-    get_words, add_library_word, can_user_edit_word, update_progress
+    get_words, add_library_word, can_user_edit_word, update_progress, get_achievements_for_student
 )
 from bot.handlers.teacher import delete_message_later
 from bot.menus import personal_dict_menu, student_main_menu, student_word_view_menu
 from bot.services.card_generator import generate_flashcard_image
+from bot.handlers.start import stop_flashcard_session 
 
 
 router = Router()
-user_flashcards = {}
 
 # ---------- FSM States ----------
 class StudentEditWord(StatesGroup):
@@ -31,7 +32,9 @@ class FlashcardState(StatesGroup):
 class PersonalDictFSM(StatesGroup):
     adding_word = State()
     adding_translation = State()
+    adding_synonyms = State()
     deleting_word_id = State()
+
 
 # ---------- Utility ----------
 def pick_weighted_word(words):
@@ -49,11 +52,6 @@ def pick_weighted_word(words):
 async def show_student_menu(message: types.Message):
     await message.answer("Выберите действие:", reply_markup=student_main_menu())
 
-@router.message(Command("stopcard"))
-async def stop_flashcard_session(message: types.Message, state: FSMContext):
-    await state.clear()
-    user_flashcards.pop(message.from_user.id, None)
-    await message.answer("⛔️ Режим флеш-карт остановлен.")
 
 @router.message(Command("help"))
 async def student_help(message: types.Message):
@@ -116,10 +114,7 @@ async def handle_module_selection(message: types.Message, state: FSMContext):
 
 @router.message(FlashcardState.awaiting_input)
 async def check_flashcard_answer(message: types.Message, state: FSMContext):
-    if message.text.strip().lower() == "/stopcard":
-        await stop_flashcard_session(message, state)
-        return
-
+    
     session_id = get_or_create_session(message.from_user.id)
     data = await state.get_data()
     word = data["current_word"]
@@ -238,11 +233,10 @@ async def personal_add_word_text(message: types.Message, state: FSMContext):
 
 @router.message(PersonalDictFSM.adding_translation)
 async def personal_add_word_translation(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    session_id = get_or_create_session(message.from_user.id)
-    add_word(session_id, data["word"], message.text.strip(), level="A1", added_by="student")
-    await message.answer(f"✅ Слово <b>{data['word']}</b> добавлено.", parse_mode="HTML")
-    await state.clear()
+    await state.update_data(translation=message.text.strip())
+    await state.set_state(PersonalDictFSM.adding_synonyms)
+    await message.answer("Введите синонимы через запятую (или '-' если нет синонимов):")
+
 
 @router.callback_query(F.data == "personal_view")
 async def personal_view(callback: types.CallbackQuery):
@@ -274,6 +268,46 @@ async def personal_delete_confirm(message: types.Message, state: FSMContext):
         deleted = cur.rowcount
     await message.answer("✅ Слово удалено." if deleted else "❌ Не удалось удалить слово.")
     await state.clear()
+
+
+@router.message(PersonalDictFSM.adding_synonyms)
+async def personal_add_word_synonyms(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    session_id = get_or_create_session(message.from_user.id)
+    synonyms = None if message.text.strip() == "-" else message.text.strip()
+
+    try:
+        add_word(
+            session_id,
+            data["word"],
+            data["translation"],
+            level="A1",
+            added_by="student",
+            synonyms=synonyms
+        )
+        await message.answer(f"✅ Слово <b>{data['word']}</b> добавлено.", parse_mode="HTML")
+    except ValueError as e:
+        await message.answer(f"❌ {str(e)}")
+
+    await state.clear()
+
+
+
+@router.message(Command("achievements"))
+async def show_achievements(message: types.Message):
+    session_id = get_or_create_session(message.from_user.id)
+    achievements = get_achievements_for_student(session_id)
+
+    if not achievements:
+        await message.answer("😔 У вас пока нет достижений.")
+        return
+
+    text = "🏆 <b>Ваши достижения:</b>\n\n"
+    for name, desc, ts in achievements:
+        text += f"• <b>{name}</b>\n  {desc}\n  📅 {ts}\n\n"
+
+    await message.answer(text.strip(), parse_mode="HTML")
+
 
 # ---------- Register ----------
 def register(dp):

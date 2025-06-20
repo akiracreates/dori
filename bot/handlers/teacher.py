@@ -6,7 +6,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.database.db_helpers import get_or_create_session, add_word, get_words, add_library_word
 from bot.menus import teacher_main_menu, confirm_batch_upload_menu
-
+from bot.database.db_helpers import get_user_role 
 import sqlite3
 import asyncio
 
@@ -34,10 +34,15 @@ class TeacherBatchAdd(StatesGroup):
     waiting_for_confirm = State()
 
 # --- Commands ---
+
 @router.message(Command("menu_teacher"))
 async def show_teacher_menu(message: types.Message):
+    role = get_user_role(message.from_user.id)
+    if role != "teacher":
+        await message.answer("⛔️ У вас нет доступа к меню преподавателя.")
+        return
     await message.answer("Выберите действие:", reply_markup=teacher_main_menu())
-    
+
 
 async def delete_message_later(bot, chat_id, message_id, delay=180):
     await asyncio.sleep(delay)
@@ -67,8 +72,13 @@ async def teacher_help(message: types.Message):
 # --- Add single word ---
 @router.callback_query(F.data == "add_word")
 async def teacher_start_add(callback: types.CallbackQuery, state: FSMContext):
+    if get_user_role(callback.from_user.id) != "teacher":
+        await callback.message.answer("⛔️ Доступ запрещён. Только для преподавателей.")
+        await callback.answer()
+        return
     await state.set_state(TeacherAddWord.waiting_for_text)
     await callback.message.answer("Введите английское слово:")
+
 
 @router.message(TeacherAddWord.waiting_for_text)
 async def teacher_get_text(message: types.Message, state: FSMContext):
@@ -105,10 +115,34 @@ async def teacher_save_word(message: types.Message, state: FSMContext):
     if not message.text.strip().isdigit():
         await message.answer("Введите только цифру модуля.")
         return
+
     await state.update_data(module=message.text.strip())
     data = await state.get_data()
     session_id = get_or_create_session(message.from_user.id)
-    add_word(session_id, data['text'], data['translation'], data['level'], data['part_of_speech'], "teacher", None, data['module'])
+
+    try:
+        add_word(
+            session_id,
+            data['text'],
+            data['translation'],
+            data['level'],
+            data['part_of_speech'],
+            "teacher",
+            None,
+            data['module']
+        )
+    except ValueError as e:
+        await message.answer(f"❌ {str(e)}")
+        await state.clear()
+        return
+
+    with sqlite3.connect("dori_bot.db") as db:
+        word_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+    add_library_word(session_id, word_id, can_edit=True)
+
+    await message.answer(f"Слово '{data['text']}' добавлено.")
+    await state.clear()
+
     with sqlite3.connect("dori_bot.db") as db:
         word_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
     add_library_word(session_id, word_id, can_edit=True)
@@ -118,6 +152,10 @@ async def teacher_save_word(message: types.Message, state: FSMContext):
 # --- Edit synonyms ---
 @router.callback_query(F.data == "edit_synonyms")
 async def teacher_prompt_edit_synonyms(callback: types.CallbackQuery, state: FSMContext):
+    if get_user_role(callback.from_user.id) != "teacher":
+        await callback.message.answer("⛔️ Доступ запрещён. Только для преподавателей.")
+        await callback.answer()
+        return
     await state.set_state(TeacherEditSynonyms.waiting_for_word_id)
     await callback.message.answer("Введите ID слова:")
 
@@ -133,10 +171,15 @@ async def teacher_receive_word_id_synonyms(message: types.Message, state: FSMCon
 # --- Batch add ---
 @router.callback_query(F.data == "add_batch")
 async def teacher_start_batch_add(callback: types.CallbackQuery, state: FSMContext):
+    if get_user_role(callback.from_user.id) != "teacher":
+        await callback.message.answer("⛔️ Доступ запрещён. Только для преподавателей.")
+        await callback.answer()
+        return
     await state.set_state(TeacherBatchAdd.waiting_for_batch_input)
     await callback.message.answer(
         "Формат: слово - перевод - синонимы - модуль\nПример:\ncat - кот - feline, kitty - 4"
     )
+
 
 @router.message(TeacherBatchAdd.waiting_for_batch_input)
 async def teacher_receive_batch_input(message: types.Message, state: FSMContext):
@@ -151,11 +194,13 @@ async def teacher_confirm_batch(callback: types.CallbackQuery, state: FSMContext
     success, failed = 0, []
     for line in data['batch_text'].splitlines():
         parts = [p.strip() for p in line.split("-")]
-        if len(parts) != 4 or not parts[3].isdigit():
+        if len(parts) < 4 or not parts[3].isdigit():
             failed.append(line)
             continue
+        text, translation, synonyms, module = parts[:4]
+        part_of_speech = parts[4] if len(parts) >= 5 else None
         try:
-            add_word(session_id, parts[0], parts[1], "A1", None, "teacher", parts[2], parts[3])
+            add_word(session_id, text, translation, "A1", part_of_speech, "teacher", synonyms, module)
             success += 1
         except Exception:
             failed.append(line)
@@ -165,6 +210,7 @@ async def teacher_confirm_batch(callback: types.CallbackQuery, state: FSMContext
     await callback.message.answer(summary)
     await state.clear()
 
+
 @router.callback_query(F.data == "cancel_batch")
 async def teacher_cancel_batch(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
@@ -173,6 +219,10 @@ async def teacher_cancel_batch(callback: types.CallbackQuery, state: FSMContext)
 # --- View & Edit ---
 @router.callback_query(F.data == "view_words")
 async def teacher_view_words(callback: types.CallbackQuery):
+    if get_user_role(callback.from_user.id) != "teacher":
+        await callback.message.answer("⛔️ Доступ запрещён. Только для преподавателей.")
+        await callback.answer()
+        return
     with sqlite3.connect("dori_bot.db") as db:
         rows = db.execute("SELECT Word_ID, Text, translation FROM Word WHERE added_by = 'teacher'").fetchall()
     if not rows:
@@ -182,8 +232,13 @@ async def teacher_view_words(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "start_edit")
 async def teacher_prompt_edit(callback: types.CallbackQuery, state: FSMContext):
+    if get_user_role(callback.from_user.id) != "teacher":
+        await callback.message.answer("⛔️ Доступ запрещён. Только для преподавателей.")
+        await callback.answer()
+        return
     await state.set_state(TeacherEditWord.waiting_for_word_id)
     await callback.message.answer("Введите ID или слово:")
+
 
 @router.message(TeacherEditWord.waiting_for_word_id)
 async def teacher_start_edit(message: types.Message, state: FSMContext):

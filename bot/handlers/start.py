@@ -6,6 +6,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from bot.sharedState import user_flashcards
 
 from bot.menus import student_main_menu, teacher_main_menu, start_choice_menu
 from bot.database.db_helpers import (
@@ -147,6 +148,26 @@ async def handle_flashcard_answer(message: types.Message, state: FSMContext):
     sent = await message.answer_photo(photo=image)
     await message.answer(f"Слово: {next_word['translation']}")
     await delete_message_later(message.bot, message.chat.id, sent.message_id)
+
+
+async def stop_flashcard_session(message: types.Message, state: FSMContext):
+    from bot.handlers.start import user_flashcards  # если не вынесено в utils
+    user_flashcards.pop(message.from_user.id, None)
+    await state.clear()
+    await message.answer("⛔️ Режим флеш-карт остановлен.")
+
+@router.message(Command("stopcard"))
+async def cmd_stop_flashcard(message: types.Message, state: FSMContext):
+    await stop_flashcard_session(message, state)
+
+
+@router.message(Command("stopcard"))
+async def force_stopcard(message: types.Message, state: FSMContext):
+    from bot.handlers.start import user_flashcards
+    user_flashcards.pop(message.from_user.id, None)
+    await state.clear()
+    await message.answer("⛔️ Режим флеш-карт остановлен.")
+
 
 # --- Help ---
 @router.message(Command("help"))

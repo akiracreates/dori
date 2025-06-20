@@ -1,15 +1,5 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-def teacher_main_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Добавить слово", callback_data="add_word")],
-        [InlineKeyboardButton(text="Добавить пакет слов", callback_data="add_batch")],  # Batch add button
-        [InlineKeyboardButton(text="Посмотреть все слова", callback_data="view_words")],
-        [InlineKeyboardButton(text="Редактировать слово", callback_data="start_edit")],
-        [InlineKeyboardButton(text="Мои модули", callback_data="view_modules")]
-    ])
-
-
 def student_main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🧠 Флеш-карты", callback_data="flashcards_start")],

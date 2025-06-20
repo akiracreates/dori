@@ -3,6 +3,7 @@ from datetime import datetime
 import random
 from typing import Dict, Optional, List
 
+
 DB_PATH = "dori_bot.db"
 
 
@@ -52,6 +53,16 @@ def update_user_level_and_role(telegram_id, level):
 def add_word(session_id, text, translation, level="A1", part_of_speech=None, added_by="student", synonyms=None, module=None):
     with get_connection() as conn:
         cur = conn.cursor()
+
+        # Проверка на дубликаты: по text + translation
+        cur.execute("""
+            SELECT 1 FROM Word WHERE LOWER(Text) = LOWER(?) AND LOWER(translation) = LOWER(?)
+        """, (text.strip(), translation.strip()))
+        
+        if cur.fetchone():
+            raise ValueError("Слово с таким переводом уже существует.")
+
+        # Вставка нового слова
         cur.execute("""
             INSERT INTO Word (Text, translation, level, part_of_speech, added_by, created_at, StudentSession_ID, synonyms, module)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -283,3 +294,16 @@ def delete_personal_word(word_id: int) -> bool:
     except sqlite3.Error as e:
         print(f"Database error in delete_personal_word: {e}")
         return False
+
+
+def get_achievements_for_student(session_id):
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT a.name, a.description, ua.timestamp
+            FROM UserAchievement ua
+            JOIN Achievement a ON ua.Achievement_ID = a.Achievement_ID
+            WHERE ua.StudentSession_ID = ?
+            ORDER BY ua.timestamp DESC
+        """, (session_id,))
+        return cur.fetchall()
