@@ -29,6 +29,12 @@ class FlashcardState(StatesGroup):
     selecting_module = State()
     awaiting_input = State()
 
+@router.message(Command(commands=["stopcard"]))
+async def stopcard_command(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("⛔️ Режим флеш-карт остановлен.")
+
+
 # --- Role selection ---
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):

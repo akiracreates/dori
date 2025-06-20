@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 from bot.services.card_generator import generate_flashcard_image
 from bot.handlers import teacher, student, start
 
+from bot.sharedState import user_flashcards
+
 
 # Load environment variables
 load_dotenv()
@@ -19,6 +21,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 # Initialize bot and dispatcher
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
+
 
 # Register all handlers and routers
 start.register(dp)

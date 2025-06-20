@@ -4,9 +4,9 @@ from aiogram import Router, types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
-from aiogram.filters import Command
-from bot.sharedState import user_flashcards
+from aiogram.filters import Command, StateFilter
 
+from bot.sharedState import user_flashcards
 from bot.database.db_helpers import (
     get_all_modules, get_connection, get_or_create_session, add_word,
     get_words, add_library_word, can_user_edit_word, update_progress, get_achievements_for_student
@@ -14,7 +14,6 @@ from bot.database.db_helpers import (
 from bot.handlers.teacher import delete_message_later
 from bot.menus import personal_dict_menu, student_main_menu, student_word_view_menu
 from bot.services.card_generator import generate_flashcard_image
-
 
 router = Router()
 
@@ -35,6 +34,13 @@ class PersonalDictFSM(StatesGroup):
     deleting_word_id = State()
 
 
+# ---------- Global Stopcard Command ----------
+@router.message(Command("stopcard"), StateFilter("*"))
+async def stopcard_command(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("⛔️ Режим флеш-карт остановлен.")
+
+
 # ---------- Utility ----------
 def pick_weighted_word(words):
     total = sum(word["weight"] for word in words)
@@ -47,13 +53,10 @@ def pick_weighted_word(words):
     return words[-1]  # fallback
 
 
-
-
 # ---------- Command Handlers ----------
 @router.message(Command("menu_student"))
 async def show_student_menu(message: types.Message):
     await message.answer("Выберите действие:", reply_markup=student_main_menu())
-
 
 @router.message(Command("help"))
 async def student_help(message: types.Message):
@@ -71,6 +74,7 @@ async def student_help(message: types.Message):
     )
     await message.answer(help_text, parse_mode="HTML")
 
+
 # ---------- Flashcard Flow ----------
 @router.callback_query(F.data == "flashcards_start")
 async def start_flashcard_practice(callback: types.CallbackQuery, state: FSMContext):
@@ -83,64 +87,38 @@ async def start_flashcard_practice(callback: types.CallbackQuery, state: FSMCont
 @router.message(FlashcardState.selecting_module)
 async def handle_module_selection(message: types.Message, state: FSMContext):
     module = message.text.strip().lower()
-    conn = get_connection()
-    cur = conn.cursor()
+    session_id = get_or_create_session(message.from_user.id)
+    words = get_words(session_id, module if module != "все" else None)
 
-    query = "SELECT Word_ID, Text, translation, synonyms FROM Word WHERE added_by = 'teacher'"
-    params = []
-    if module != "все":
-        query += " AND LOWER(module) = LOWER(?)"
-        params.append(module)
-
-    cur.execute(query, params)
-    rows = cur.fetchall()
-    conn.close()
-
-    if not rows:
+    if not words:
         await message.answer("Слов из этого модуля не найдено.")
         return
 
-    words = [{"Word_ID": r[0], "Text": r[1], "translation": r[2], "synonyms": r[3] or "не указаны"} for r in rows]
     random.shuffle(words)
-    user_flashcards[message.from_user.id] = words[1:]
-    word = words[0]
+    current_word = words[0]
+    flashcards = words[1:]
 
     await state.set_state(FlashcardState.awaiting_input)
-    await state.update_data(current_word=word)
+    await state.update_data(current_word=current_word, flashcards=flashcards)
 
-    image = await generate_flashcard_image(..., is_question=True)
+    image = await generate_flashcard_image(current_word["translation"], is_question=True)
     sent = await message.answer_photo(photo=image)
-
-    await message.answer(f"Слово: {word['translation']}")
+    await message.answer(f"Слово: {current_word['translation']}")
     asyncio.create_task(delete_message_later(message.bot, message.chat.id, sent.message_id))
+
 
 @router.message(FlashcardState.awaiting_input)
 async def check_flashcard_answer(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-
-    if message.text.strip().lower() == "/stopcard":
-        print("[DEBUG] intercepted /stopcard inside awaiting_input")
-        await state.clear()
-        await message.answer("⛔️ Режим флеш-карт остановлен.")
-        return
-
     session_id = get_or_create_session(message.from_user.id)
     data = await state.get_data()
 
-    # ⛔️ Если /stopcard уже был вызван
-    if data.get("stopcard"):
+    if "current_word" not in data:
         await state.clear()
         return
 
-    # Защита от потери current_word
-    if "current_word" not in data:
-        await message.answer("⚠️ Ошибка: нет текущего слова.")
-        await state.update_data(stopcard=True)
-        await state.set_state(None)
-
-        return
-
     word = data["current_word"]
+    flashcards = data.get("flashcards", [])
+
     user_input = message.text.strip().lower()
     correct = word["Text"].strip().lower()
     synonyms = [s.strip().lower() for s in (word.get("synonyms") or "").split(",")]
@@ -153,12 +131,8 @@ async def check_flashcard_answer(message: types.Message, state: FSMContext):
         "✅ Верно (синоним)!" if user_input in synonyms else
         f"❌ Неверно.\nПравильный ответ: <b>{word['Text']}</b>"
     )
-    await message.answer(
-        f"{feedback}\nСинонимы: {word.get('synonyms', 'не указаны')}",
-        parse_mode="HTML"
-    )
 
-    flashcards = data.get("flashcards", [])
+    await message.answer(f"{feedback}\nСинонимы: {word.get('synonyms', 'не указаны')}", parse_mode="HTML")
 
     if not flashcards:
         await message.answer("🎉 Тренировка завершена")
@@ -169,15 +143,7 @@ async def check_flashcard_answer(message: types.Message, state: FSMContext):
         flashcards.append(word)
 
     next_word = flashcards.pop(0)
-
-    # обновляем только то, что нужно
     await state.update_data(current_word=next_word, flashcards=flashcards)
-
-    # ещё раз проверим флаг остановки
-    data = await state.get_data()
-    if data.get("stopcard"):
-        await state.clear()
-        return
 
     image = await generate_flashcard_image(next_word["translation"], is_question=True)
     sent = await message.answer_photo(photo=image)
