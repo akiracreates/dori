@@ -20,8 +20,6 @@ load_dotenv()
 TEACHER_PASS = os.getenv("TEACHER_PASS")
 
 router = Router()
-user_flashcards = {}
-
 # --- FSM States ---
 class RoleSelection(StatesGroup):
     waiting_for_teacher_password = State()
