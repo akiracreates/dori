@@ -5,15 +5,19 @@ from typing import Optional
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from aiogram.types import BufferedInputFile
 import logging
+import platform
+
 
 # Настройка логгера
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+
 # Конфигурационные параметры
 class FlashcardConfig:
     FONT_PATHS = {
-        'main': 'fonts/arial.ttf',
+        'main': 'fonts/arial.ttf' if platform.system() == 'Windows' else '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
         'fallback': None
     }
     IMAGE_SIZE = (800, 600)
