@@ -90,13 +90,13 @@ Create `.env`:
 
 ## 7. Authors
 
--   Хаггаг Амира --- Team lead & developer
--   Доди Георгий --- Analyst & tester
--   Ткаченко Иван --- Analyst & tester
--   Иордан Милене --- Manager & developer
--   Зленко Наталья --- Manager
--   Славова Ирина --- Tester
--   Еланский Максим --- Fullstack developer
+-   Amira Haggag --- Team lead & developer
+-   Georgy Dodi --- Analyst & tester
+-   Ivan Tkachenko --- Analyst & tester
+-   Mylene Jordan --- Manager & developer
+-   Natalia Zlenko --- Manager
+-   Irina Slavova --- Tester
+-   Maksim Yelanskyi --- Fullstack developer
 
 ## 8. Contact
 
